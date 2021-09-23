@@ -43,6 +43,9 @@ class Command(ABC):
                 else:
                     log.info(f"No actions defined in this card. command_keyword={command_keyword}")
 
+    def is_my_command(self, message):
+        return False
+
     def set_default_card_callback_keyword(self):
         if self.card_callback_keyword is None:
             if 'data' not in self.card['actions'][0]:
