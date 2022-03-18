@@ -188,7 +188,7 @@ class WebexBot(WebexWebsocketClient):
         is_one_on_one_space = 'ONE_ON_ONE' in activity['target']['tags']
 
         if activity['actor']['type'] != 'PERSON':
-            log.debug('message is from a bot, ignoring')
+            log.debug('message is from a bot, ignoring: %s', teams_message.personEmail)
             return
 
         # Log details on message
