@@ -17,9 +17,7 @@ from webex_bot.websockets.webex_websocket_client import WebexWebsocketClient, DE
 
 log = logging.getLogger(__name__)
 coloredlogs.install(level=os.getenv("LOG_LEVEL", "INFO"),
-                    fmt='%(asctime)s  [%(levelname)s]  '
-                        '[%(module)s.%(name)s.%(funcName)'
-                        's]:%(lineno)s %(message)s')
+                    fmt='%(asctime)s  [%(levelname)-7s]  [%(name)s.%(funcName)s]:%(lineno)s %(message)s')
 
 
 class WebexBot(WebexWebsocketClient):
