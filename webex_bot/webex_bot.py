@@ -32,7 +32,8 @@ class WebexBot(WebexWebsocketClient):
                  device_url=DEFAULT_DEVICE_URL,
                  include_demo_commands=False,
                  bot_name="Webex Bot",
-                 bot_help_subtitle="Click on a button to begin."):
+                 bot_help_subtitle="Click on a button to begin.",
+                 help_command=None):
         """
         Initialise WebexBot.
 
@@ -54,13 +55,16 @@ class WebexBot(WebexWebsocketClient):
         # text and callback function
         # By default supports 2 command, echo and help
 
-        self.help_command = HelpCommand(
-            bot_name=bot_name,
-            bot_help_subtitle=bot_help_subtitle,
-            bot_help_image=self.teams.people.me().avatar)
+        if help_command is None:
+            help_command = HelpCommand(
+                bot_name=bot_name,
+                bot_help_subtitle=bot_help_subtitle,
+                bot_help_image=self.teams.people.me().avatar)
+        self.help_command = help_command
         self.commands = {
             self.help_command
         }
+
         if include_demo_commands:
             self.commands.add(EchoCommand())
             self.commands.add(AgendaCommand())
