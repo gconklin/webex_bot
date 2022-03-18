@@ -30,7 +30,7 @@ class WebexBot(WebexWebsocketClient):
                  device_url=DEFAULT_DEVICE_URL,
                  include_demo_commands=False,
                  bot_name="Webex Bot",
-                 bot_help_subtitle="Click on a button to begin.",
+                 bot_help_subtitle="Here are my available commands. Click one to begin.",
                  help_command=None):
         """
         Initialise WebexBot.
