@@ -105,7 +105,7 @@ class WebexWebsocketClient(object):
         ack_message = {'type': 'ack',
                        'messageId': message_id}
         asyncio.run(self.websocket.send(json.dumps(ack_message)))
-        logging.info(f"WebSocket ack message with id={message_id}. Complete.")
+        logger.info(f"WebSocket ack message with id={message_id}. Complete.")
 
     def _get_device_info(self, check_existing=True):
         """
@@ -155,7 +155,7 @@ class WebexWebsocketClient(object):
         @backoff.on_exception(backoff.expo, socket.gaierror)
         async def _connect_and_listen():
             ws_url = self.device_info['webSocketUrl']
-            logging.info(f"Opening websocket connection to {ws_url}")
+            logger.info(f"Opening websocket connection to {ws_url}")
             async with websockets.connect(ws_url, ssl=ssl_context) as _websocket:
                 self.websocket = _websocket
                 logger.info("WebSocket Opened.")
