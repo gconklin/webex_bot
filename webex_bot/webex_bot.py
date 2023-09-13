@@ -5,8 +5,8 @@ import os
 import backoff
 import coloredlogs
 import requests
+import webexteamssdk
 
-from webex_bot.commands.agenda import AgendaCommand
 from webex_bot.commands.echo import EchoCommand
 from webex_bot.commands.help import HelpCommand
 from webex_bot.exceptions import BotException
@@ -32,7 +32,7 @@ class WebexBot(WebexWebsocketClient):
                  device_url=DEFAULT_DEVICE_URL,
                  include_demo_commands=False,
                  bot_name="Webex Bot",
-                 bot_help_subtitle="Click on a button to begin."):
+                 bot_help_subtitle="Here are my available commands. Click one to begin."):
         """
         Initialise WebexBot.
 
@@ -40,6 +40,10 @@ class WebexBot(WebexWebsocketClient):
         @param approved_users: List of email address who are allowed to chat to this bot.
         @param approved_domains: List of domains which are allowed to chat to this bot.
         @param approved_rooms: List of rooms whose members are allowed to chat to this bot.
+        @param device_url: WDM Url
+        @param include_demo_commands: If True, any demo commands will be included.
+        @param bot_name: Your custom name for the bot.
+        @param bot_help_subtitle: Text to show in the help card.
         """
 
         log.info("Registering bot with Webex cloud")
@@ -62,8 +66,7 @@ class WebexBot(WebexWebsocketClient):
             self.help_command
         }
         if include_demo_commands:
-            self.commands.add(EchoCommand())
-            self.commands.add(AgendaCommand())
+            self.add_command(EchoCommand())
 
         self.help_command.commands = self.commands
 
@@ -84,16 +87,13 @@ class WebexBot(WebexWebsocketClient):
         """
         me = self.teams.people.me()
         self.bot_display_name = me.displayName
-        log.info(f"Running as bot '{me.displayName}' with email {me.emails}")
+        log.info(f"Running as {me.type} '{me.displayName}' with email {me.emails}")
         log.debug(f"Running as bot '{me}'")
 
     def add_command(self, command_class: Command):
         """
         Add a new command to the bot
-        :param command: The command string, example "/status"
-        :param help_message: A Help string for this command
-        :param callback: The function to run when this command is given
-        :return:
+        @param command_class: Command Class to add
         """
 
         for c in self.commands:
@@ -106,6 +106,8 @@ class WebexBot(WebexWebsocketClient):
                                 f"'{command_class.command_keyword}' adaptive card JSON.")
 
         self.commands.add(command_class)
+        for chained_command in command_class.chained_commands:
+            self.commands.add(chained_command)
 
     def approval_parameters_check(self):
         """
@@ -118,7 +120,7 @@ class WebexBot(WebexWebsocketClient):
                         "approved_rooms=['Y2lzY29zcGFyazovL3VzL1JPT00vZDUwMDE2ZWEtNmQ5My00MTY1LTg0ZWEtOGNmNTNhYjA3YzA5']) "
                         "bot parameters.")
 
-    def check_user_approved(self, user_email):
+    def check_user_approved(self, user_email, approved_rooms):
         """
         A user is approved if they are in an approved domain or the approved_users list.
 
@@ -126,33 +128,36 @@ class WebexBot(WebexWebsocketClient):
 
         Throws BotException if user is not approved.
 
+        @param approved_rooms: list of spaces the user needs to be in to use this command.
         @param user_email: The email from the user of the incoming message.
         """
         user_approved = False
         self.approval_parameters_check()
 
-        if len(self.approved_users) == 0 and len(self.approved_domains) == 0 and len(self.approved_rooms) == 0:
+        if len(self.approved_users) == 0 and len(self.approved_domains) == 0 and len(approved_rooms) == 0:
             user_approved = True
         elif len(self.approved_domains) > 0 and user_email.split('@')[1] in self.approved_domains:
             user_approved = True
         elif len(self.approved_users) > 0 and user_email in self.approved_users:
             user_approved = True
-        elif len(self.approved_rooms) > 0 and self.is_user_member_of_room(user_email, self.approved_rooms):
+        elif len(approved_rooms) > 0 and self.is_user_member_of_room(user_email, approved_rooms):
             user_approved = True
 
         if not user_approved:
-            log.warning(f"{user_email} is not approved to interact with bot. Ignoring.")
+            log.warning(f"{user_email} is not approved to interact at this time. Ignoring.")
         return user_approved
 
     def is_user_member_of_room(self, user_email, approved_rooms):
         is_user_member = False
 
         for approved_room in approved_rooms:
-            room_members = self.teams.memberships.list(roomId=approved_room, personEmail=user_email)
-            for member in room_members:
-                if member.personEmail == user_email:
-                    is_user_member = True
-
+            try:
+                room_members = self.teams.memberships.list(roomId=approved_room, personEmail=user_email)
+                for member in room_members:
+                    if member.personEmail == user_email:
+                        is_user_member = True
+            except webexteamssdk.exceptions.ApiError as apie:
+                log.warn(f"API error: {apie}")
         return is_user_member
 
     def process_incoming_card_action(self, attachment_actions, activity):
@@ -167,7 +172,7 @@ class WebexBot(WebexWebsocketClient):
         command_keyword = attachment_actions.inputs.get(COMMAND_KEYWORD_KEY)
         is_card_callback_command = callback_keyword is not None
         raw_message = callback_keyword if callback_keyword else command_keyword
-        logging.debug(f"raw_message (callback) ='{raw_message}' is_card_callback_command={is_card_callback_command}")
+        log.debug(f"raw_message (callback) ='{raw_message}' is_card_callback_command={is_card_callback_command}")
 
         self.process_raw_command(raw_message,
                                  attachment_actions, activity['actor']['emailAddress'], activity,
@@ -186,13 +191,13 @@ class WebexBot(WebexWebsocketClient):
         is_one_on_one_space = 'ONE_ON_ONE' in activity['target']['tags']
 
         if activity['actor']['type'] != 'PERSON':
-            logging.debug('message is from a bot, ignoring')
+            log.debug('message is from a bot, ignoring')
             return
 
         # Log details on message
         log.info(f"Message from {user_email}: {teams_message}")
 
-        if not self.check_user_approved(user_email=user_email):
+        if not self.check_user_approved(user_email=user_email, approved_rooms=self.approved_rooms):
             return
 
         # Remove the Bots display name from the message if this is not a 1-1
@@ -206,32 +211,62 @@ class WebexBot(WebexWebsocketClient):
         is_one_on_one_space = 'ONE_ON_ONE' in activity['target']['tags']
 
         # Find the command that was sent, if any
-        command = self.help_command
+        command = None
+        user_command = raw_message.lower()
+        log.info(f"New user_command: {user_command}")
+        log.info(f"is_card_callback_command: {is_card_callback_command}")
 
         for c in self.commands:
-            user_command = raw_message.lower()
             log.debug("--------")
-            log.debug(f"is_card_callback_command: {is_card_callback_command}")
-            log.debug(f"user_command: {user_command}")
-            log.debug(f"command_keyword: {c.command_keyword}")
+            log.debug(f"Checking c.command_keyword: {c.command_keyword}")
 
             if not is_card_callback_command and c.command_keyword:
+                log.debug(f"c.command_keyword: {c.command_keyword}")
                 if user_command.find(c.command_keyword) != -1:
                     command = c
-                    log.debug(f"Found command: {command.command_keyword}")
                     # If a command was found, stop looking for others
                     break
             else:
                 log.debug(f"card_callback_keyword: {c.card_callback_keyword}")
                 if user_command == c.command_keyword or user_command == c.card_callback_keyword:
                     command = c
-                    log.debug(f"Found command: {command.command_keyword}")
                     break
+
+        if not command:
+            log.warning(f"Did not find command for {user_command}. Default to help card.")
+            command = self.help_command
+        else:
+            log.info(f"Found command: {command.command_keyword}")
+
+            if command.approved_rooms:
+                if not self.check_user_approved(user_email=user_email, approved_rooms=command.approved_rooms):
+                    log.info(f"{user_email} is not allowed to run command: '{command.command_keyword}'")
+                    return
 
         # Build the reply to the user
         reply = ""
         reply_one_to_one = False
         message_without_command = WebexBot.get_message_passed_to_command(command.command_keyword, raw_message)
+        thread_parent_id = None
+
+        if hasattr(teams_message, "inputs") and teams_message.inputs.get("thread_parent_id"):
+            thread_parent_id = teams_message.inputs.get("thread_parent_id")
+        elif 'parent' in activity:
+            log.info(f"activity: {activity}")
+
+            if activity['parent']['type'] == 'reply':
+                thread_parent_id = activity['parent']['id']
+            else:
+                # Some bug where message cannot be sent back in response to cardAction in thread.
+                # Must reply outside of the thread in this case.
+                log.warning(f"There is a server side bug where message cannot be sent back in "
+                            f"response to cardAction inside a thread. "
+                            f"Must reply outside of the thread in this case.: {activity}")
+                thread_parent_id = None
+        elif 'id' in activity:
+            thread_parent_id = activity['id']
+        else:
+            log.info("There is no activity id (thread ID) for this request.")
 
         if command.delete_previous_message and hasattr(teams_message, 'messageId'):
             previous_message_id = teams_message.messageId
@@ -250,7 +285,7 @@ class WebexBot(WebexWebsocketClient):
                                                                                                message=message_without_command,
                                                                                                teams_message=teams_message,
                                                                                                activity=activity)
-            self.do_reply(pre_card_load_reply, room_id, user_email, pre_card_load_reply_one_to_one, is_one_on_one_space)
+            self.do_reply(pre_card_load_reply, room_id, user_email, pre_card_load_reply_one_to_one, is_one_on_one_space, thread_parent_id)
             reply = response
         else:
             log.debug(f"Going to run command: '{command}' with input: '{message_without_command}'")
@@ -258,20 +293,22 @@ class WebexBot(WebexWebsocketClient):
                                                                                    message=message_without_command,
                                                                                    teams_message=teams_message,
                                                                                    activity=activity)
-            self.do_reply(pre_execute_reply, room_id, user_email, pre_execute_reply_one_to_one, is_one_on_one_space)
+            self.do_reply(pre_execute_reply, room_id, user_email, pre_execute_reply_one_to_one, is_one_on_one_space, thread_parent_id)
             reply, reply_one_to_one = self.run_command_and_handle_bot_exceptions(command=command,
                                                                                  message=message_without_command,
                                                                                  teams_message=teams_message,
                                                                                  activity=activity)
+        log.info(f"Using thread id={thread_parent_id}")
+        return self.do_reply(reply, room_id, user_email, reply_one_to_one, is_one_on_one_space, thread_parent_id)
 
-        return self.do_reply(reply, room_id, user_email, reply_one_to_one, is_one_on_one_space)
-
-    def do_reply(self, reply, room_id, user_email, reply_one_to_one, is_one_on_one_space):
+    def do_reply(self, reply, room_id, user_email, reply_one_to_one, is_one_on_one_space, conv_target_id):
         # allow command handlers to craft their own Teams message
         if reply and isinstance(reply, Response):
             # If the Response lacks a roomId, set it to the incoming room
             if not reply.roomId:
                 reply.roomId = room_id
+            if not reply.parentId and conv_target_id:
+                reply.parentId = conv_target_id
             reply = reply.as_dict()
             self.teams.messages.create(**reply)
             reply = "ok"
@@ -282,6 +319,8 @@ class WebexBot(WebexWebsocketClient):
                 if isinstance(response, Response):
                     if not response.roomId:
                         response.roomId = room_id
+                    if not response.parentId and conv_target_id:
+                        response.parentId = conv_target_id
                     self.teams.messages.create(**response.as_dict())
                 else:
                     # Just a plain message
@@ -289,14 +328,16 @@ class WebexBot(WebexWebsocketClient):
                                                         room_id,
                                                         reply_one_to_one,
                                                         is_one_on_one_space,
-                                                        response)
+                                                        response,
+                                                        conv_target_id)
             reply = "ok"
         elif reply:
             self.send_message_to_room_or_person(user_email,
                                                 room_id,
                                                 reply_one_to_one,
                                                 is_one_on_one_space,
-                                                reply)
+                                                reply,
+                                                conv_target_id)
         return reply
 
     def send_message_to_room_or_person(self,
@@ -304,17 +345,20 @@ class WebexBot(WebexWebsocketClient):
                                        room_id,
                                        reply_one_to_one,
                                        is_one_on_one_space,
-                                       reply):
+                                       reply,
+                                       conv_target_id):
         default_move_to_one_to_one_heads_up = \
             quote_info(f"{user_email} I've messaged you 1-1. Please reply to me there.")
         if reply_one_to_one:
             if not is_one_on_one_space:
                 self.teams.messages.create(roomId=room_id,
-                                           markdown=default_move_to_one_to_one_heads_up)
+                                           markdown=default_move_to_one_to_one_heads_up,
+                                           parentId=conv_target_id)
             self.teams.messages.create(toPersonEmail=user_email,
-                                       markdown=reply)
+                                       markdown=reply,
+                                       parentId=conv_target_id)
         else:
-            self.teams.messages.create(roomId=room_id, markdown=reply)
+            self.teams.messages.create(roomId=room_id, markdown=reply, parentId=conv_target_id)
 
     def run_pre_card_load_reply(self, command, message, teams_message, activity):
         """

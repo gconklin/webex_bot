@@ -17,7 +17,17 @@ inside a LAN. This package instead uses a websocket to receive messages from the
 * Restrict bot to certain users or domains.
 * Uses the [webexteamssdk][2] package to send back replies from the bot.
 
-## Getting started
+## 🚀 Getting started
+
+---
+
+### ✨ Sample Project
+
+You can find a sample project, using OpenAI/ChatGPT with this library here: https://github.com/fbradyirl/openai_bot
+
+----
+
+**Only Python 3.9 is tested at this time.**
 
 1. Install this module from pypi:
 
@@ -43,7 +53,9 @@ from webex_bot.webex_bot import WebexBot
 
 # Create a Bot Object
 bot = WebexBot(teams_bot_token=os.getenv("WEBEX_TEAMS_ACCESS_TOKEN"),
-               approved_rooms=['06586d8d-6aad-4201-9a69-0bf9eeb5766e'])
+               approved_rooms=['06586d8d-6aad-4201-9a69-0bf9eeb5766e'],
+               bot_name="My Teams Ops Bot",
+               include_demo_commands=True)
 
 # Add new commands for the bot to listen out for.
 bot.add_command(EchoCommand())
@@ -57,11 +69,13 @@ where EchoCommand is defined as:
 ```python
 import logging
 
-from webex_bot.cards.echo_card import ECHO_CARD_CONTENT
+from webexteamssdk.models.cards import Colors, TextBlock, FontWeight, FontSize, Column, AdaptiveCard, ColumnSet, \
+    Text, Image, HorizontalAlignment
+from webexteamssdk.models.cards.actions import Submit
+
 from webex_bot.formatting import quote_info
 from webex_bot.models.command import Command
-from webex_bot.cards.busy_card import BUSY_CARD_CONTENT
-from webex_bot.models.response import Response
+from webex_bot.models.response import response_from_adaptive_card
 
 log = logging.getLogger(__name__)
 
@@ -71,46 +85,31 @@ class EchoCommand(Command):
     def __init__(self):
         super().__init__(
             command_keyword="echo",
-            help_message="Type in something here and it will be echo'd back to you. How useful is that!",
-            card=ECHO_CARD_CONTENT)
-
-    def pre_card_load_reply(self, message, attachment_actions, activity):
-        """
-        (optional function).
-        Reply before sending the initial card.
-
-        Useful if it takes a long time for the card to load.
-
-        :return: a string or Response object (or a list of either). Use Response if you want to return another card.
-        """
-
-        response = Response()
-        response.text = "This bot requires a client which can render cards."
-        response.attachments = {
-            "contentType": "application/vnd.microsoft.card.adaptive",
-            "content": BUSY_CARD_CONTENT
-        }
-
-        # As with all replies, you can send a Response() (card), a string or a list of either or mix.
-        return [response, "Sit tight! I going to show the echo card soon."]
+            help_message="Echo Words Back to You!",
+            chained_commands=[EchoCallback()])
 
     def pre_execute(self, message, attachment_actions, activity):
         """
-        (optionol function).
+        (optional function).
         Reply before running the execute function.
 
         Useful to indicate the bot is handling it if it is a long running task.
 
         :return: a string or Response object (or a list of either). Use Response if you want to return another card.
         """
-        response = Response()
-        response.text = "This bot requires a client which can render cards."
-        response.attachments = {
-            "contentType": "application/vnd.microsoft.card.adaptive",
-            "content": BUSY_CARD_CONTENT
-        }
 
-        return response
+        image = Image(url="https://i.postimg.cc/2jMv5kqt/AS89975.jpg")
+        text1 = TextBlock("Working on it....", weight=FontWeight.BOLDER, wrap=True, size=FontSize.DEFAULT,
+                          horizontalAlignment=HorizontalAlignment.CENTER, color=Colors.DARK)
+        text2 = TextBlock("I am busy working on your request. Please continue to look busy while I do your work.",
+                          wrap=True, color=Colors.DARK)
+        card = AdaptiveCard(
+            body=[ColumnSet(columns=[Column(items=[image], width=2)]),
+                  ColumnSet(columns=[Column(items=[text1, text2])]),
+                  ])
+
+        return response_from_adaptive_card(card)
+
     def execute(self, message, attachment_actions, activity):
         """
         If you want to respond to a submit operation on the card, you
@@ -124,10 +123,35 @@ class EchoCommand(Command):
         :param attachment_actions: attachment_actions object
         :param activity: activity object
 
-        :return: a string or Response object. Use Response if you want to return another card.
+        :return: a string or Response object (or a list of either). Use Response if you want to return another card.
         """
-        email = activity["actor"]['emailAddress']
 
+        text1 = TextBlock("Echo", weight=FontWeight.BOLDER, size=FontSize.MEDIUM)
+        text2 = TextBlock("Type in something here and it will be echo'd back to you. How useful is that!",
+                          wrap=True, isSubtle=True)
+        input_text = Text(id="message_typed", placeholder="Type something here", maxLength=30)
+        input_column = Column(items=[input_text], width=2)
+
+        submit = Submit(title="Submit",
+                        data={
+                            "callback_keyword": "echo_callback"})
+
+        card = AdaptiveCard(
+            body=[ColumnSet(columns=[Column(items=[text1, text2], width=2)]),
+                  ColumnSet(columns=[input_column]),
+                  ], actions=[submit])
+
+        return response_from_adaptive_card(card)
+
+
+class EchoCallback(Command):
+
+    def __init__(self):
+        super().__init__(
+            card_callback_keyword="echo_callback",
+            delete_previous_message=True)
+
+    def execute(self, message, attachment_actions, activity):
         return quote_info(attachment_actions.inputs.get("message_typed"))
 ```
 
@@ -136,6 +160,11 @@ class EchoCommand(Command):
 `echo`
 
 and off you go!
+
+# Help
+
+* If you are a Cisco employee, you can join the [discussion space here][7].
+* Alternatively, open an issue or PR with a question on usage.
 
 # History
 
@@ -257,18 +286,67 @@ and off you go!
 
 * Bug fix Thanks @muhammad-rafi
 
+### 0.2.20 (2022-04-07)
+
+* Fix for [#6][i6]
+* Fix for [#20][i20]
+* Use system SSL context when connecting websocket.
+
+### 0.2.21 (2022-04-07)
+
+* Fix for [#13][i13] - Update websockets lib to latest.
+
+### 0.2.22 (2022-04-11)
+
+* Allow for commands to only respond if you are in the approved space.
+
+### 0.3.0 (2022-04-26)
+
+* Add `chained_commands` as a parameter of Command. This allows multiple related cards to be added at once.
+* Updated Echo to use Adaptive Card objects (instead of JSON/Dict blob)
+* Added docs for some function params.
+
+### 0.3.1 (2022-04-26)
+
+* Fix old school dict cards
+
+### 0.3.3 (2022-06-07)
+
+* Update [webexteamssdk][2] to latest release.
+
+### 0.3.4 (2022-11-01)
+
+* Auto re-connect on websockets.exceptions.ConnectionClosedOK
+
+### 0.4.0 (2023-April-03)
+
+* Bot will reply in response to the original message via the thread ID. This is not always possible in the case of a
+  card action response due to some server side issue.
+
+### 0.4.1 (2023-Sept-07)
+
+* Always ensure there is a thread ID in the Activity before accessing it
+
 [1]: https://github.com/aaugustin/websockets
 
 [2]: https://github.com/CiscoDevNet/webexteamssdk
 
 [3]: https://developer.webex.com/docs/bots
 
-[4]: https://github.com/fbradyirl/webex_bot/example.py
+[4]: https://github.com/fbradyirl/webex_bot/blob/main/example.py
 
 [5]: https://www.webex.com
 
 [6]: https://github.com/CiscoSE/pyadaptivecards
 
+[7]: https://eurl.io/#TeBLqZjLs
+
 [i1]: https://github.com/fbradyirl/webex_bot/issues/1
 
 [i2]: https://github.com/fbradyirl/webex_bot/issues/2
+
+[i6]: https://github.com/fbradyirl/webex_bot/issues/6
+
+[i13]: https://github.com/fbradyirl/webex_bot/issues/13
+
+[i20]: https://github.com/fbradyirl/webex_bot/issues/20
